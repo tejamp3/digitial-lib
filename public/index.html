@@ -1,0 +1,121 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>GATE Digital Library</title>
+  <style>
+    body { font-family: system-ui, Arial; max-width: 900px; margin: 2rem auto; padding: 1rem; }
+    input, textarea { width: 100%; padding: .6rem; margin: .4rem 0; border: 1px solid #ddd; border-radius: 6px; }
+    button { padding: .6rem 1rem; border-radius: 6px; border: none; background: #0b74ff; color: white; cursor: pointer; }
+    .resource { border-bottom: 1px solid #eee; padding: .6rem 0; }
+    .small { font-size: .9rem; color: #555; }
+  </style>
+</head>
+<body>
+  <h1>📚 GATE Digital Library</h1>
+  <p class="small">Anyone can upload a PDF or paste a YouTube link. Files are uploaded to Cloudinary; metadata is saved in MongoDB Atlas.</p>
+
+  <div>
+    <input id="title" placeholder="Title (required)" />
+    <textarea id="desc" placeholder="Short description"></textarea>
+    <input type="file" id="pdfFile" accept="application/pdf" />
+    <input id="yt" placeholder="YouTube link (optional)" />
+    <div style="display:flex; gap:.5rem; margin-top:.5rem;">
+      <button id="uploadBtn">Upload</button>
+      <button id="refreshBtn" type="button">Refresh list</button>
+    </div>
+    <div id="msg" style="margin-top:.6rem;color:green"></div>
+  </div>
+
+  <h2 style="margin-top:1.5rem">All Resources</h2>
+  <div id="list"></div>
+
+<script>
+const cloudName = "CLOUDINARY_CLOUD_NAME"; // replace in Railway env or via search-replace later
+const preset = "CLOUDINARY_UPLOAD_PRESET"; // replace in Railway env
+
+async function uploadToCloudinary(file) {
+  const data = new FormData();
+  data.append("file", file);
+  data.append("upload_preset", preset);
+  const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/upload`, {
+    method: "POST",
+    body: data
+  });
+  return res.json();
+}
+
+async function postMetadata(meta) {
+  const res = await fetch("/api/resources", {
+    method: "POST",
+    headers: { "Content-Type":"application/json" },
+    body: JSON.stringify(meta)
+  });
+  return res.json();
+}
+
+document.getElementById("uploadBtn").onclick = async () => {
+  const title = document.getElementById("title").value.trim();
+  const description = document.getElementById("desc").value.trim();
+  const yt = document.getElementById("yt").value.trim();
+  const fileEl = document.getElementById("pdfFile");
+  const file = fileEl.files[0];
+
+  if (!title) { alert("Please add a title"); return; }
+
+  document.getElementById("msg").innerText = "Uploading...";
+
+  let pdfUrl = "";
+  if (file) {
+    try {
+      const uploaded = await uploadToCloudinary(file);
+      if (uploaded.secure_url) pdfUrl = uploaded.secure_url;
+      else { alert("Upload failed"); document.getElementById("msg").innerText=""; return; }
+    } catch (err) {
+      console.error(err);
+      alert("Upload error");
+      document.getElementById("msg").innerText="";
+      return;
+    }
+  }
+
+  await postMetadata({ title, description, pdfUrl, ytLink: yt || null });
+  document.getElementById("msg").innerText = "Uploaded ✔";
+  document.getElementById("title").value = "";
+  document.getElementById("desc").value = "";
+  document.getElementById("yt").value = "";
+  fileEl.value = "";
+  loadList();
+};
+
+document.getElementById("refreshBtn").onclick = loadList;
+
+async function loadList() {
+  const res = await fetch("/api/resources");
+  const data = await res.json();
+  const list = document.getElementById("list");
+  if (!Array.isArray(data)) { list.innerHTML = "<p>Error loading</p>"; return; }
+  list.innerHTML = data.map(r => `
+    <div class="resource">
+      <div style="display:flex; justify-content:space-between">
+        <strong>${escapeHtml(r.title)}</strong>
+        <span class="small">${new Date(r.uploadedAt).toLocaleString()}</span>
+      </div>
+      <div class="small">${escapeHtml(r.description || "")}</div>
+      <div style="margin-top:.5rem">
+        ${r.pdfUrl ? `<a href="${r.pdfUrl}" target="_blank">View PDF</a>` : ""}
+        ${r.ytLink ? `<a href="${r.ytLink}" target="_blank" style="margin-left:10px">Watch Video</a>` : ""}
+      </div>
+    </div>
+  `).join("");
+}
+
+function escapeHtml(str) {
+  return String(str || "").replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s]));
+}
+
+loadList();
+</script>
+</body>
+</html>
